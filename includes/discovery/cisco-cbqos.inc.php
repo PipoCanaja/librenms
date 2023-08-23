@@ -170,3 +170,206 @@ if ($device['os_group'] == 'cisco') {
         echo "\n";
     } // End if not error
 }
+
+if ($device['os'] == 'vrp') {
+    $module = 'Cisco-CBQOS';
+
+    $component = new LibreNMS\Component();
+    $components = $component->getComponents($device['device_id'], ['type'=>$module]);
+
+    // We only care about our device id.
+    $components = $components[$device['device_id']];
+
+    // Begin our master array, all other values will be processed into this array.
+    $tblCBQOS = [];
+
+    // Let's gather some data..
+    $hwCBQoSPolicyCfgInfoTable = SnmpQuery::hideMib()->walk('HUAWEI-CBQOS-MIB::hwCBQoSPolicyCfgInfoTable');
+    $hwCBQoSPolicyClassCfgInfoTable = SnmpQuery::hideMib()->walk('HUAWEI-CBQOS-MIB::hwCBQoSPolicyClassCfgInfoTable');
+    $hwCBQoSIfApplyPolicyTable = SnmpQuery::hideMib()->walk('HUAWEI-CBQOS-MIB::hwCBQoSIfApplyPolicyTable');
+    //$hwCBQoSVlanApplyPolicyTable = SnmpQuery::hideMib()->walk('HUAWEI-CBQOS-MIB::hwCBQoSVlanApplyPolicyTable');
+    $hwCBQoSClassifierCfgInfoTable  = SnmpQuery::hideMib()->walk('HUAWEI-CBQOS-MIB::hwCBQoSClassifierCfgInfoTable');
+    $hwCBQoSBehaviorCfgInfoTable  = SnmpQuery::hideMib()->walk('HUAWEI-CBQOS-MIB::hwCBQoSBehaviorCfgInfoTable');
+    $hwCBQoSPolicyStatisticsTable = SnmpQuery::hideMib()->walk('HUAWEI-CBQOS-MIB::hwCBQoSPolicyStatisticsTable');
+    $hwCBQoSPolicyStatisticsClassifierTable = SnmpQuery::hideMib()->walk('HUAWEI-CBQOS-MIB::hwCBQoSPolicyStatisticsClassifierTable');
+   
+    $hwCBQoSPolicyStatSubPolicyClassifierRunInfoTable = SnmpQuery::hideMib()->walk('HUAWEI-CBQOS-MIB::hwCBQoSPolicyStatSubPolicyClassifierRunInfoTable');
+
+    d_echo('hwCBQoSPolicyCfgInfoTable');
+    d_echo($hwCBQoSPolicyCfgInfoTable->table(1));
+    d_echo('hwCBQoSPolicyClassCfgInfoTable');
+    d_echo($hwCBQoSPolicyClassCfgInfoTable->table(2));
+    d_echo('hwCBQoSIfApplyPolicyTable');
+    d_echo($hwCBQoSIfApplyPolicyTable->table(2));
+    //d_echo($hwCBQoSVlanApplyPolicyTable->table(2));
+    d_echo('hwCBQoSClassifierCfgInfoTable');
+    d_echo($hwCBQoSClassifierCfgInfoTable->table(4));
+    d_echo('hwCBQoSBehaviorCfgInfoTable');
+    d_echo($hwCBQoSBehaviorCfgInfoTable->table(4));
+
+    d_echo('hwCBQoSPolicyStatisticsTable');
+    d_echo($hwCBQoSPolicyStatisticsTable->table(4));
+    d_echo('hwCBQoSPolicyStatisticsClassifierTable');
+    d_echo($hwCBQoSPolicyStatisticsClassifierTable->table(4));
+
+    d_echo($hwCBQoSPolicyStatSubPolicyClassifierRunInfoTable->table(5));
+
+die;
+
+    /*
+     * False == no object found - this is not an error, there is no QOS configured
+     * null  == timeout or something else that caused an error, there may be QOS configured but we couldn't get it.
+     */
+    if (is_null($hwCBQoSPolicyCfgInfoTable) || is_null($hwCBQoSPolicyClassCfgInfoTable) || is_null($hwCBQoSIfApplyPolicyTable) || is_null($hwCBQoSPolicyStatisticsTable) || is_null($hwCBQoSPolicyStatisticsClassifierTable)) {
+        // We have to error here or we will end up deleting all our QoS components.
+        echo "Error\n";
+    } else {
+        // No Error, lets process things.
+        d_echo("QoS Objects Found:\n");
+
+        foreach ($hwCBQoSPolicyCfgInfoTable->table(2) as $index => $hwCBQoSPolicy) {
+            $spId[$hwCBQoSPolicy['hwCBQoSPolicyName']] = $index;
+            $spTable[$index] = $hwCBQoSPolicy;
+            
+        }
+        foreach ($hwCBQoSPolicyClassCfgInfoTable->table(2)  as $index => $hwCBQoSPolicyClass) {
+            $spTable[$index]['member'] = $hwCBQoSPolicyClass;
+        }
+
+d_echo($spTable);
+
+        foreach ($hwCBQoSIfApplyPolicyTable->table(2) as $ifIndex => $array1) {
+            foreach ($array1 as $direction => $array) {
+                $result = [];
+                $curSpId = $spId[$array['hwCBQoSIfApplyPolicyName']];
+                // Produce a unique reproducible index for this entry.
+                $result['UID'] = hash('crc32', $ifindex . '-' . $direction . '-' . $curSpId);
+
+                // Now that we have a valid identifiers, lets add some more data
+                $result['sp-id'] = $curSpId;
+                $result['sp-obj'] = '';
+
+                $result['qos-type'] = 1; //policyMap
+
+                // Add the Parent, this lets us work out our hierarchy for display later.
+                $result['parent'] = 0;
+                $result['direction'] = $array['hwCBQoSIfApplyPolicyDirection'];
+                $result['ifindex'] = $ifIndex;
+                $result['label'] = $array['hwCBQoSIfApplyPolicyName'];
+                $tblCBQOS[] = $result;
+            }
+        }
+
+d_echo($tblCBQOS);
+
+if (0) {
+    if (0) {
+                // Gather different data depending on the type.
+                switch ($type) {
+                    case 1:
+                        // Policy-map, get data from that table.
+                        d_echo("\nIndex: " . $index . "\n");
+                        d_echo('    UID: ' . $result['UID'] . "\n");
+                        d_echo('    SPID.SPOBJ: ' . $result['sp-id'] . '.' . $result['sp-obj'] . "\n");
+                        d_echo('    If-Index: ' . $result['ifindex'] . "\n");
+                        d_echo("    Type: 1 - Policy-Map\n");
+                        $result['label'] = $tblcbQosPolicyMapCfg['1.3.6.1.4.1.9.9.166.1.6.1.1.1'][$index];
+                        if ($tblcbQosPolicyMapCfg['1.3.6.1.4.1.9.9.166.1.6.1.1.2'][$index] != '') {
+                            $result['label'] .= ' - ' . $tblcbQosPolicyMapCfg['1.3.6.1.4.1.9.9.166.1.6.1.1.2'][$index];
+                        }
+                        d_echo('    Label: ' . $result['label'] . "\n");
+                        break;
+                    case 2:
+                        // Class-map, get data from that table.
+                        d_echo("\nIndex: " . $index . "\n");
+                        d_echo('    UID: ' . $result['UID'] . "\n");
+                        d_echo('    SPID.SPOBJ: ' . $result['sp-id'] . '.' . $result['sp-obj'] . "\n");
+                        d_echo('    If-Index: ' . $result['ifindex'] . "\n");
+                        d_echo("    Type: 2 - Class-Map\n");
+                        $result['label'] = $tblcbQosClassMapCfg['1.3.6.1.4.1.9.9.166.1.7.1.1.1'][$index];
+                        if ($tblcbQosClassMapCfg['1.3.6.1.4.1.9.9.166.1.7.1.1.2'][$index] != '') {
+                            $result['label'] .= ' - ' . $tblcbQosClassMapCfg['1.3.6.1.4.1.9.9.166.1.7.1.1.2'][$index];
+                        }
+                        d_echo('    Label: ' . $result['label'] . "\n");
+                        if ($tblcbQosClassMapCfg['1.3.6.1.4.1.9.9.166.1.7.1.1.3'][$index] == 2) {
+                            $result['map-type'] = 'Match-All';
+                        } elseif ($tblcbQosClassMapCfg['1.3.6.1.4.1.9.9.166.1.7.1.1.3'][$index] == 3) {
+                            $result['map-type'] = 'Match-Any';
+                        } else {
+                            $result['map-type'] = 'None';
+                        }
+
+                        // Find a child, this will be a type 3
+                        foreach ($tblcbQosObjects['1.3.6.1.4.1.9.9.166.1.5.1.1.4'][$spid] as $id => $value) {
+                            if ($value == $result['sp-obj']) {
+                                // We have our child, import the match
+                                if ($tblcbQosObjects['1.3.6.1.4.1.9.9.166.1.5.1.1.3'][$spid][$id] == 3) {
+                                    $result['match'] = $result['map-type'] . ': ' . $tblcbQosMatchStmtCfg['1.3.6.1.4.1.9.9.166.1.8.1.1.1'][$tblcbQosObjects['1.3.6.1.4.1.9.9.166.1.5.1.1.2'][$spid][$id]];
+                                    d_echo('    Match: ' . $result['match'] . "\n");
+                                }
+                            }
+                        }
+                        break;
+                    default:
+                        //continue 2;
+                }
+
+                $tblCBQOS[] = $result;
+            }
+        }
+
+        /*
+         * Ok, we have our 2 array's (Components and SNMP) now we need
+         * to compare and see what needs to be added/updated.
+         *
+         * Let's loop over the SNMP data to see if we need to ADD or UPDATE any components.
+         */
+        foreach ($tblCBQOS as $key => $array) {
+            $component_key = false;
+
+            // Loop over our components to determine if the component exists, or we need to add it.
+            foreach ($components as $compid => $child) {
+                if ($child['UID'] === $array['UID']) {
+                    $component_key = $compid;
+                }
+            }
+
+            if (! $component_key) {
+                // The component doesn't exist, we need to ADD it - ADD.
+                $new_component = $component->createComponent($device['device_id'], $module);
+                $component_key = key($new_component);
+                $components[$component_key] = array_merge($new_component[$component_key], $array);
+                echo '+';
+            } else {
+                // The component does exist, merge the details in - UPDATE.
+                $components[$component_key] = array_merge($components[$component_key], $array);
+                echo '.';
+            }
+        }
+
+        /*
+         * Loop over the Component data to see if we need to DELETE any components.
+         */
+        foreach ($components as $key => $array) {
+            // Guilty until proven innocent
+            $found = false;
+
+            foreach ($tblCBQOS as $k => $v) {
+                if ($array['UID'] == $v['UID']) {
+                    // Yay, we found it...
+                    $found = true;
+                }
+            }
+
+            if ($found === false) {
+                // The component has not been found. we should delete it.
+                echo '-';
+                $component->deleteComponent($key);
+            }
+        }
+
+        // Write the Components back to the DB.
+        $component->setComponentPrefs($device['device_id'], $components);
+        echo "\n";
+    } // End if not error
+}
